@@ -1,0 +1,35 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM_X 1024	
+
+struct ParticleData2D {
+	bool isActive;
+	int id;
+	float2 position;
+};
+
+RWStructuredBuffer<ParticleData2D> _ParticlesBuffer;
+
+cbuffer cb {
+	float _TimeSinceStartup;
+}
+
+
+[numthreads(THREAD_NUM_X, 1, 1)]
+void Init (uint3 DTid : SV_DispatchThreadID)
+{
+	int id = DTid.x;
+
+	_ParticlesBuffer[id].isActive = true;
+	_ParticlesBuffer[id].id = id;
+	_ParticlesBuffer[id].position = float2(id, id);
+}
+
+[numthreads(THREAD_NUM_X, 1, 1)]
+void Update(uint3 DTid : SV_DispatchThreadID) {
+
+	int id = DTid.x;
+	_ParticlesBuffer[id].position = float2(id * 0.01 * cos(id + _TimeSinceStartup), id * 0.01 * sin(id + _TimeSinceStartup));
+
+}
