@@ -1,0 +1,113 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM_X 1024	
+
+#include "ClassicNoise2D.cginc"
+
+struct ParticleData2D {
+	bool isActive;
+	int id;
+	float life;
+	float2 position;
+	float2 velocity;
+};
+
+StructuredBuffer<ParticleData2D> _ParticlesBufferRead;
+RWStructuredBuffer<ParticleData2D> _ParticlesBufferWrite;
+
+int _NumParticles;
+float2 _LifeParams;   // 1/min, 1/max
+float2 _EmitterPos;
+float2 _EmitterSize;
+float3 _Direction;	// x, y, z: spread
+float2 _Acceleration;
+float2 _SpeedParams;  // speed, randomness
+float4 _Config;		  // x: throttle, y: random seed, y: dT, w: time
+
+float nrand(float2 uv, float salt) {
+	uv += float2(salt, _Config.y);
+	return frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float2 new_particle_position(float2 uv) {
+	float time = _Config.w;
+
+	float2 p = float2(nrand(uv, time), nrand(uv, time + 1));
+	p = (p - (float2)0.5) * _EmitterSize + _EmitterPos;
+
+	return p;
+}
+
+float2 new_particle_velocity(float2 uv) {
+
+	// Random vector
+	float2 v = float2(nrand(uv, 6), nrand(uv, 7));
+	v = (v - (float2)0.5) * 2;
+
+	// Spreading
+	v = lerp(_Direction.xy, v, _Direction.z);
+
+	// Speed
+	v = normalize(v) * _SpeedParams.x;
+	v *= 1.0 - nrand(uv, 9) * _SpeedParams.y;
+
+	return v;
+}
+
+[numthreads(THREAD_NUM_X, 1, 1)]
+void Init (uint3 DTid : SV_DispatchThreadID)
+{
+	int id = DTid.x;
+
+	_ParticlesBufferWrite[id].isActive = id < (int)(_Config.x * _NumParticles);
+	
+	_ParticlesBufferWrite[id].id = id;
+	_ParticlesBufferWrite[id].life = nrand(float2(id, id), 14);
+	_ParticlesBufferWrite[id].position = new_particle_position(float2(id, id));
+	_ParticlesBufferWrite[id].velocity = new_particle_velocity(float2(id, id));
+}
+
+
+[numthreads(THREAD_NUM_X, 1, 1)]
+void Update(uint3 DTid : SV_DispatchThreadID) {
+
+	int id = DTid.x;
+
+	float life = _ParticlesBufferRead[id].life;
+	float2 position = _ParticlesBufferRead[id].position;
+	float2 velocity = _ParticlesBufferRead[id].velocity;
+
+	float dt = _Config.z;
+
+	// position update
+	if (life > 0) {
+		velocity += _Acceleration * dt;
+
+		// Acceleration by turbulent noise
+		//float2 np = (p + _NoiseOffset) * _NoiseParams.x;
+		//float3 n1 = snoise_grad(np);;
+		//float3 n2 = snoise_grad(np + float3(0, 13.28, 0));
+		//v += cross(n1, n2) * _NoiseParams.y * dt;
+
+		position += velocity * dt;
+
+
+		// Decaying
+		life -= lerp(_LifeParams.x, _LifeParams.y, nrand(float2(id, id), 12)) * dt;
+
+	} else {
+		position = new_particle_position(float2(id, id));
+		velocity = new_particle_velocity(float2(id, id));
+		life = nrand(float2(id, id), 14);
+		
+	}
+
+	_ParticlesBufferWrite[id].life = life;
+	
+	_ParticlesBufferWrite[id].velocity = velocity;
+	_ParticlesBufferWrite[id].position = position;
+
+	_ParticlesBufferWrite[id].isActive = id < (int)(_Config.x * _NumParticles);
+
+}
